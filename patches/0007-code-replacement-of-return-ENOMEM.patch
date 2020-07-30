@@ -1,0 +1,2210 @@
+From 7e63e651e4d52bc5bc2b3c9b28135d23fcb35ff3 Mon Sep 17 00:00:00 2001
+From: user <user@localhost.localdomain>
+Date: Thu, 30 Jul 2020 13:48:59 -0400
+Subject: [PATCH 7/7] code replacement of "return -ENOMEM;"
+
+---
+ arch/x86/entry/syscalls/syscall_64.tbl.rej | 10 +++
+ include/uapi/linux/sysctl.h.rej            | 11 +++
+ kernel/sysctl.c.rej                        | 18 +++++
+ mm/backing-dev.c                           |  6 +-
+ mm/cma.c                                   |  4 +-
+ mm/cma_debug.c                             |  4 +-
+ mm/filemap.c.rej                           | 16 +++++
+ mm/gup.c                                   |  2 +-
+ mm/gup_benchmark.c                         |  2 +-
+ mm/huge_memory.c                           |  2 +-
+ mm/hugetlb.c                               | 14 ++--
+ mm/kasan/common.c                          |  4 +-
+ mm/kasan/init.c                            |  8 +--
+ mm/khugepaged.c                            |  6 +-
+ mm/kmemleak-test.c                         |  2 +-
+ mm/kmemleak.c                              |  2 +-
+ mm/ksm.c                                   |  4 +-
+ mm/list_lru.c                              | 14 ++--
+ mm/madvise.c                               |  4 +-
+ mm/memblock.c                              |  4 +-
+ mm/memcontrol.c                            | 16 ++---
+ mm/memfd.c                                 |  2 +-
+ mm/memory.c                                | 48 ++++++-------
+ mm/mempolicy.c                             |  6 +-
+ mm/mempool.c                               |  6 +-
+ mm/migrate.c                               |  6 +-
+ mm/mincore.c                               |  4 +-
+ mm/mlock.c                                 |  2 +-
+ mm/mm_init.c                               |  2 +-
+ mm/mmap.c                                  | 82 +++++++++++-----------
+ mm/mmap.c.rej                              | 11 +++
+ mm/mmu_notifier.c                          |  2 +-
+ mm/mprotect.c                              |  6 +-
+ mm/mremap.c                                |  6 +-
+ mm/nommu.c                                 | 22 +++---
+ mm/page_ext.c                              |  6 +-
+ mm/page_owner.c                            |  4 +-
+ mm/percpu-stats.c                          |  2 +-
+ mm/percpu-vm.c                             |  8 +--
+ mm/process_vm_access.c                     |  2 +-
+ mm/rmap.c                                  |  6 +-
+ mm/shmem.c                                 | 16 ++---
+ mm/slab.c                                  |  8 +--
+ mm/slab_common.c                           |  8 +--
+ mm/slub.c                                  |  6 +-
+ mm/sparse-vmemmap.c                        | 10 +--
+ mm/sparse.c                                |  2 +-
+ mm/swap_cgroup.c                           |  4 +-
+ mm/swap_slots.c                            |  4 +-
+ mm/swap_state.c                            |  4 +-
+ mm/swapfile.c                              | 10 +--
+ mm/util.c                                  |  2 +-
+ mm/vmalloc.c                               | 16 ++---
+ mm/vmpressure.c                            |  2 +-
+ mm/vmscan.c                                |  4 +-
+ mm/z3fold.c                                |  4 +-
+ mm/zbud.c                                  |  2 +-
+ mm/zsmalloc.c                              |  4 +-
+ mm/zswap.c                                 |  6 +-
+ 59 files changed, 282 insertions(+), 216 deletions(-)
+ create mode 100644 arch/x86/entry/syscalls/syscall_64.tbl.rej
+ create mode 100644 include/uapi/linux/sysctl.h.rej
+ create mode 100644 kernel/sysctl.c.rej
+ create mode 100644 mm/filemap.c.rej
+ create mode 100644 mm/mmap.c.rej
+
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl.rej b/arch/x86/entry/syscalls/syscall_64.tbl.rej
+new file mode 100644
+index 000000000..1bbe0ae7b
+--- /dev/null
++++ b/arch/x86/entry/syscalls/syscall_64.tbl.rej
+@@ -0,0 +1,10 @@
++--- arch/x86/entry/syscalls/syscall_64.tbl
+++++ arch/x86/entry/syscalls/syscall_64.tbl
++@@ -344,6 +344,7 @@
++ 333    common  io_pgetevents           sys_io_pgetevents
++ 334    common  rseq                    sys_rseq
++ 335    common  add2int                 sys_add2int
+++336    common  pagecache_counter       sys_pagecache_counter
++ 
++ # don't use numbers 387 through 423, add new calls after the last
++ # 'common' entry
+diff --git a/include/uapi/linux/sysctl.h.rej b/include/uapi/linux/sysctl.h.rej
+new file mode 100644
+index 000000000..7160414a3
+--- /dev/null
++++ b/include/uapi/linux/sysctl.h.rej
+@@ -0,0 +1,11 @@
++--- include/uapi/linux/sysctl.h
+++++ include/uapi/linux/sysctl.h
++@@ -161,7 +161,7 @@ enum
++ /* CTL_VM names: */
++ enum
++ {
++-       VM_UNUSED1=1,           /* was: struct: Set vm swapping control */
+++       VM_ERROR_BARF=1,        /* was: struct: Set vm swapping control */
++        VM_UNUSED2=2,           /* was; int: Linear or sqrt() swapout for hogs */
++        VM_UNUSED3=3,           /* was: struct: Set free page thresholds */
++        VM_UNUSED4=4,           /* Spare */
+diff --git a/kernel/sysctl.c.rej b/kernel/sysctl.c.rej
+new file mode 100644
+index 000000000..12868ed7f
+--- /dev/null
++++ b/kernel/sysctl.c.rej
+@@ -0,0 +1,18 @@
++--- kernel/sysctl.c
+++++ kernel/sysctl.c
++@@ -2658,6 +2659,15 @@ static struct ctl_table vm_table[] = {
++                .extra1         = SYSCTL_ZERO,
++                .extra2         = &two,
++        },
+++       {
+++               .procname       = "error_barf",
+++               .data           = &sysctl_error_barf,
+++               .maxlen         = sizeof(sysctl_error_barf),
+++               .mode           = 0644,
+++               .proc_handler   = proc_dointvec_minmax,
+++               .extra1         = SYSCTL_ZERO,
+++               .extra2         = SYSCTL_ONE,
+++       },
++        {
++                .procname       = "pagecache_hits",
++                .data           = &pagecache_hit,
+diff --git a/mm/backing-dev.c b/mm/backing-dev.c
+index d382272bc..a52b319d7 100644
+--- a/mm/backing-dev.c
++++ b/mm/backing-dev.c
+@@ -242,7 +242,7 @@ static int __init default_bdi_init(void)
+ 	bdi_wq = alloc_workqueue("writeback", WQ_MEM_RECLAIM | WQ_UNBOUND |
+ 				 WQ_SYSFS, 0);
+ 	if (!bdi_wq)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	err = bdi_init(&noop_backing_dev_info);
+ 
+@@ -800,7 +800,7 @@ static int __init cgwb_init(void)
+ 	 */
+ 	cgwb_release_wq = alloc_workqueue("cgwb_release", 0, 1);
+ 	if (!cgwb_release_wq)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	return 0;
+ }
+@@ -814,7 +814,7 @@ static int cgwb_bdi_init(struct backing_dev_info *bdi)
+ 
+ 	bdi->wb_congested = kzalloc(sizeof(*bdi->wb_congested), GFP_KERNEL);
+ 	if (!bdi->wb_congested)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	refcount_set(&bdi->wb_congested->refcnt, 1);
+ 
+diff --git a/mm/cma.c b/mm/cma.c
+index 26ecff818..88bfcf316 100644
+--- a/mm/cma.c
++++ b/mm/cma.c
+@@ -102,7 +102,7 @@ static int __init cma_activate_area(struct cma *cma)
+ 	cma->bitmap = bitmap_zalloc(cma_bitmap_maxno(cma), GFP_KERNEL);
+ 	if (!cma->bitmap) {
+ 		cma->count = 0;
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	WARN_ON_ONCE(!pfn_valid(pfn));
+@@ -207,7 +207,7 @@ int __init cma_init_reserved_mem(phys_addr_t base, phys_addr_t size,
+ 	} else {
+ 		cma->name = kasprintf(GFP_KERNEL, "cma%d\n", cma_area_count);
+ 		if (!cma->name)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	cma->base_pfn = PFN_DOWN(base);
+ 	cma->count = size >> PAGE_SHIFT;
+diff --git a/mm/cma_debug.c b/mm/cma_debug.c
+index 4e6cbe2f5..b8acfcdbe 100644
+--- a/mm/cma_debug.c
++++ b/mm/cma_debug.c
+@@ -135,12 +135,12 @@ static int cma_alloc_mem(struct cma *cma, int count)
+ 
+ 	mem = kzalloc(sizeof(*mem), GFP_KERNEL);
+ 	if (!mem)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	p = cma_alloc(cma, count, 0, false);
+ 	if (!p) {
+ 		kfree(mem);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	mem->p = p;
+diff --git a/mm/filemap.c.rej b/mm/filemap.c.rej
+new file mode 100644
+index 000000000..4685ee373
+--- /dev/null
++++ b/mm/filemap.c.rej
+@@ -0,0 +1,16 @@
++--- mm/filemap.c
+++++ mm/filemap.c
++@@ -1600,11 +1600,12 @@ EXPORT_SYMBOL(find_lock_entry);
++ 
++ int pagecache_miss;
++ int pagecache_hit;
+++int sysctl_error_barf;
++ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t index,
++                int fgp_flags, gfp_t gfp_mask)
++ {
++        struct page *page;
++-       
+++
++ repeat:
++        page = find_get_entry(mapping, index);                          /*returns the found page or shadow entry, NULL if nothing is found*/
++        if(page){
+diff --git a/mm/gup.c b/mm/gup.c
+index 6f47697f8..f4b8e8d5c 100644
+--- a/mm/gup.c
++++ b/mm/gup.c
+@@ -1785,7 +1785,7 @@ static long __gup_longterm_locked(struct task_struct *tsk,
+ 					   sizeof(struct vm_area_struct *),
+ 					   GFP_KERNEL);
+ 			if (!vmas_tmp)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 		flags = memalloc_nocma_save();
+ 	}
+diff --git a/mm/gup_benchmark.c b/mm/gup_benchmark.c
+index be690fa66..28c58b3e8 100644
+--- a/mm/gup_benchmark.c
++++ b/mm/gup_benchmark.c
+@@ -78,7 +78,7 @@ static int __gup_benchmark_ioctl(unsigned int cmd,
+ 	nr_pages = gup->size / PAGE_SIZE;
+ 	pages = kvcalloc(nr_pages, sizeof(void *), GFP_KERNEL);
+ 	if (!pages)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	i = 0;
+ 	nr = gup->nr_pages_per_call;
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index 78c84bee7..5ece81580 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -346,7 +346,7 @@ static int __init hugepage_init_sysfs(struct kobject **hugepage_kobj)
+ 	*hugepage_kobj = kobject_create_and_add("transparent_hugepage", mm_kobj);
+ 	if (unlikely(!*hugepage_kobj)) {
+ 		pr_err("failed to create transparent hugepage kobject\n");
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	err = sysfs_create_group(*hugepage_kobj, &hugepage_attr_group);
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index 590111ea6..a926bc7ad 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -460,7 +460,7 @@ static int allocate_file_region_entries(struct resv_map *resv,
+ 		list_del(&rg->link);
+ 		kfree(rg);
+ 	}
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -513,7 +513,7 @@ static long region_add(struct resv_map *resv, long f, long t,
+ 
+ 		if (allocate_file_region_entries(
+ 			    resv, actual_regions_needed - in_regions_needed)) {
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 
+ 		goto retry;
+@@ -563,7 +563,7 @@ static long region_chg(struct resv_map *resv, long f, long t,
+ 		*out_regions_needed = 1;
+ 
+ 	if (allocate_file_region_entries(resv, *out_regions_needed))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	resv->adds_in_progress += *out_regions_needed;
+ 
+@@ -648,7 +648,7 @@ static long region_del(struct resv_map *resv, long f, long t)
+ 				spin_unlock(&resv->lock);
+ 				nrg = kmalloc(sizeof(*nrg), GFP_KERNEL);
+ 				if (!nrg)
+-					return -ENOMEM;
++					ENOMEM_DUMPER(sysctl_error_barf);
+ 				goto retry;
+ 			}
+ 
+@@ -2707,7 +2707,7 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
+ 	if (node_alloc_noretry)
+ 		nodes_clear(*node_alloc_noretry);
+ 	else
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	spin_lock(&hugetlb_lock);
+ 
+@@ -3043,7 +3043,7 @@ static int hugetlb_sysfs_add_hstate(struct hstate *h, struct kobject *parent,
+ 
+ 	hstate_kobjs[hi] = kobject_create_and_add(h->name, parent);
+ 	if (!hstate_kobjs[hi])
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	retval = sysfs_create_group(hstate_kobjs[hi], hstate_attr_group);
+ 	if (retval)
+@@ -5125,7 +5125,7 @@ int hugetlb_reserve_pages(struct inode *inode,
+ 		/* Private mapping. */
+ 		resv_map = resv_map_alloc();
+ 		if (!resv_map)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 		chg = to - from;
+ 
+diff --git a/mm/kasan/common.c b/mm/kasan/common.c
+index 757d4074f..4f68c0577 100644
+--- a/mm/kasan/common.c
++++ b/mm/kasan/common.c
+@@ -602,7 +602,7 @@ int kasan_module_alloc(void *addr, size_t size)
+ 		return 0;
+ 	}
+ 
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ void kasan_free_shadow(const struct vm_struct *vm)
+@@ -734,7 +734,7 @@ static int kasan_populate_vmalloc_pte(pte_t *ptep, unsigned long addr,
+ 
+ 	page = __get_free_page(GFP_KERNEL);
+ 	if (!page)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	memset((void *)page, KASAN_VMALLOC_INVALID, PAGE_SIZE);
+ 	pte = pfn_pte(PFN_DOWN(__pa(page)), PAGE_KERNEL);
+diff --git a/mm/kasan/init.c b/mm/kasan/init.c
+index fe6be0be1..83b21cb82 100644
+--- a/mm/kasan/init.c
++++ b/mm/kasan/init.c
+@@ -133,7 +133,7 @@ static int __ref zero_pmd_populate(pud_t *pud, unsigned long addr,
+ 			else
+ 				p = early_alloc(PAGE_SIZE, NUMA_NO_NODE);
+ 			if (!p)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 			pmd_populate_kernel(&init_mm, pmd, p);
+ 		}
+@@ -168,7 +168,7 @@ static int __ref zero_pud_populate(p4d_t *p4d, unsigned long addr,
+ 			if (slab_is_available()) {
+ 				p = pmd_alloc(&init_mm, pud, addr);
+ 				if (!p)
+-					return -ENOMEM;
++					ENOMEM_DUMPER(sysctl_error_barf);
+ 			} else {
+ 				pud_populate(&init_mm, pud,
+ 					early_alloc(PAGE_SIZE, NUMA_NO_NODE));
+@@ -209,7 +209,7 @@ static int __ref zero_p4d_populate(pgd_t *pgd, unsigned long addr,
+ 			if (slab_is_available()) {
+ 				p = pud_alloc(&init_mm, p4d, addr);
+ 				if (!p)
+-					return -ENOMEM;
++					ENOMEM_DUMPER(sysctl_error_barf);
+ 			} else {
+ 				p4d_populate(&init_mm, p4d,
+ 					early_alloc(PAGE_SIZE, NUMA_NO_NODE));
+@@ -271,7 +271,7 @@ int __ref kasan_populate_early_shadow(const void *shadow_start,
+ 			if (slab_is_available()) {
+ 				p = p4d_alloc(&init_mm, pgd, addr);
+ 				if (!p)
+-					return -ENOMEM;
++					ENOMEM_DUMPER(sysctl_error_barf);
+ 			} else {
+ 				pgd_populate(&init_mm, pgd,
+ 					early_alloc(PAGE_SIZE, NUMA_NO_NODE));
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 700f5160f..ce7d2308b 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -362,7 +362,7 @@ int hugepage_madvise(struct vm_area_struct *vma,
+ 		 */
+ 		if (!(*vm_flags & VM_NO_KHUGEPAGED) &&
+ 				khugepaged_enter_vma_merge(vma, *vm_flags))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		break;
+ 	case MADV_NOHUGEPAGE:
+ 		*vm_flags &= ~VM_HUGEPAGE;
+@@ -384,7 +384,7 @@ int __init khugepaged_init(void)
+ 					  sizeof(struct mm_slot),
+ 					  __alignof__(struct mm_slot), 0, NULL);
+ 	if (!mm_slot_cache)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	khugepaged_pages_to_scan = HPAGE_PMD_NR * 8;
+ 	khugepaged_max_ptes_none = HPAGE_PMD_NR - 1;
+@@ -463,7 +463,7 @@ int __khugepaged_enter(struct mm_struct *mm)
+ 
+ 	mm_slot = alloc_mm_slot();
+ 	if (!mm_slot)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* __khugepaged_exit() must not run from under us */
+ 	VM_BUG_ON_MM(khugepaged_test_exit(mm), mm);
+diff --git a/mm/kmemleak-test.c b/mm/kmemleak-test.c
+index e19279ff6..551035380 100644
+--- a/mm/kmemleak-test.c
++++ b/mm/kmemleak-test.c
+@@ -68,7 +68,7 @@ static int __init kmemleak_test_init(void)
+ 		elem = kzalloc(sizeof(*elem), GFP_KERNEL);
+ 		pr_info("kzalloc(sizeof(*elem)) = %p\n", elem);
+ 		if (!elem)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		INIT_LIST_HEAD(&elem->list);
+ 		list_add_tail(&elem->list, &test_list);
+ 	}
+diff --git a/mm/kmemleak.c b/mm/kmemleak.c
+index e362dc3d2..f80b04c8a 100644
+--- a/mm/kmemleak.c
++++ b/mm/kmemleak.c
+@@ -1970,7 +1970,7 @@ static int __init kmemleak_late_init(void)
+ 		 * two clean-up threads but serialized by scan_mutex.
+ 		 */
+ 		schedule_work(&cleanup_work);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_DEBUG_KMEMLEAK_AUTO_SCAN)) {
+diff --git a/mm/ksm.c b/mm/ksm.c
+index 4102034cd..297a39951 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -324,7 +324,7 @@ static int __init ksm_slab_init(void)
+ out_free1:
+ 	kmem_cache_destroy(rmap_item_cache);
+ out:
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static void __init ksm_slab_free(void)
+@@ -2495,7 +2495,7 @@ int __ksm_enter(struct mm_struct *mm)
+ 
+ 	mm_slot = alloc_mm_slot();
+ 	if (!mm_slot)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Check ksm_run too?  Would need tighter locking */
+ 	needs_wakeup = list_empty(&ksm_mm_head.mm_list);
+diff --git a/mm/list_lru.c b/mm/list_lru.c
+index 9222910ab..9af2140ee 100644
+--- a/mm/list_lru.c
++++ b/mm/list_lru.c
+@@ -346,7 +346,7 @@ static int __memcg_init_list_lru_node(struct list_lru_memcg *memcg_lrus,
+ 	return 0;
+ fail:
+ 	__memcg_destroy_list_lru_node(memcg_lrus, begin, i);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static int memcg_init_list_lru_node(struct list_lru_node *nlru)
+@@ -357,11 +357,11 @@ static int memcg_init_list_lru_node(struct list_lru_node *nlru)
+ 	memcg_lrus = kvmalloc(sizeof(*memcg_lrus) +
+ 			      size * sizeof(void *), GFP_KERNEL);
+ 	if (!memcg_lrus)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (__memcg_init_list_lru_node(memcg_lrus, 0, size)) {
+ 		kvfree(memcg_lrus);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	RCU_INIT_POINTER(nlru->memcg_lrus, memcg_lrus);
+ 
+@@ -399,11 +399,11 @@ static int memcg_update_list_lru_node(struct list_lru_node *nlru,
+ 					lockdep_is_held(&list_lrus_mutex));
+ 	new = kvmalloc(sizeof(*new) + new_size * sizeof(void *), GFP_KERNEL);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (__memcg_init_list_lru_node(new, old_size, new_size)) {
+ 		kvfree(new);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	memcpy(&new->lru, &old->lru, old_size * sizeof(void *));
+@@ -455,7 +455,7 @@ static int memcg_init_list_lru(struct list_lru *lru, bool memcg_aware)
+ 			continue;
+ 		memcg_destroy_list_lru_node(&lru->node[i]);
+ 	}
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static void memcg_destroy_list_lru(struct list_lru *lru)
+@@ -491,7 +491,7 @@ static int memcg_update_list_lru(struct list_lru *lru,
+ 		memcg_cancel_update_list_lru_node(&lru->node[i],
+ 						  old_size, new_size);
+ 	}
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static void memcg_cancel_update_list_lru(struct list_lru *lru,
+diff --git a/mm/madvise.c b/mm/madvise.c
+index dd1d43cf0..cb15d40a3 100644
+--- a/mm/madvise.c
++++ b/mm/madvise.c
+@@ -773,7 +773,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
+ 		mmap_read_lock(current->mm);
+ 		vma = find_vma(current->mm, start);
+ 		if (!vma)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		if (start < vma->vm_start) {
+ 			/*
+ 			 * This "vma" under revalidation is the one
+@@ -784,7 +784,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
+ 			 * virtual range passed to MADV_DONTNEED
+ 			 * or MADV_FREE.
+ 			 */
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 		if (!can_madv_lru_vma(vma))
+ 			return -EINVAL;
+diff --git a/mm/memblock.c b/mm/memblock.c
+index 39aceafc5..63d6374cc 100644
+--- a/mm/memblock.c
++++ b/mm/memblock.c
+@@ -652,7 +652,7 @@ static int __init_memblock memblock_add_range(struct memblock_type *type,
+ 	if (!insert) {
+ 		while (type->cnt + nr_new > type->max)
+ 			if (memblock_double_array(type, obase, size) < 0)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 		insert = true;
+ 		goto repeat;
+ 	} else {
+@@ -732,7 +732,7 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
+ 	/* we'll create at most two more regions */
+ 	while (type->cnt + 2 > type->max)
+ 		if (memblock_double_array(type, base, size) < 0)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	for_each_memblock_type(idx, type, rgn) {
+ 		phys_addr_t rbase = rgn->base;
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index 13f559af1..1e7780ce8 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -336,7 +336,7 @@ static int memcg_expand_one_shrinker_map(struct mem_cgroup *memcg,
+ 
+ 		new = kvmalloc_node(sizeof(*new) + size, GFP_KERNEL, nid);
+ 		if (!new)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 		/* Set all old bits, clear all new bits */
+ 		memset(new->map, (int)0xff, old_size);
+@@ -2576,7 +2576,7 @@ static int try_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
+ 	}
+ nomem:
+ 	if (!(gfp_mask & __GFP_NOFAIL))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ force:
+ 	/*
+ 	 * The allocation either can't fail or will lead to more memory
+@@ -2916,7 +2916,7 @@ int __memcg_kmem_charge(struct mem_cgroup *memcg, gfp_t gfp,
+ 			return 0;
+ 		}
+ 		cancel_charge(memcg, nr_pages);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	return 0;
+ }
+@@ -4190,7 +4190,7 @@ static int mem_cgroup_oom_register_event(struct mem_cgroup *memcg,
+ 
+ 	event = kmalloc(sizeof(*event),	GFP_KERNEL);
+ 	if (!event)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	spin_lock(&memcg_oom_lock);
+ 
+@@ -4597,7 +4597,7 @@ static ssize_t memcg_write_event_control(struct kernfs_open_file *of,
+ 
+ 	event = kzalloc(sizeof(*event), GFP_KERNEL);
+ 	if (!event)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	event->memcg = memcg;
+ 	INIT_LIST_HEAD(&event->list);
+@@ -5116,7 +5116,7 @@ static int mem_cgroup_css_online(struct cgroup_subsys_state *css)
+ 	 */
+ 	if (memcg_alloc_shrinker_maps(memcg)) {
+ 		mem_cgroup_id_remove(memcg);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Online state pins memcg ID, memcg ID pins CSS */
+@@ -6160,7 +6160,7 @@ static int memory_stat_show(struct seq_file *m, void *v)
+ 
+ 	buf = memory_stat_format(memcg);
+ 	if (!buf)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	seq_puts(m, buf);
+ 	kfree(buf);
+ 	return 0;
+@@ -6976,7 +6976,7 @@ int mem_cgroup_try_charge_swap(struct page *page, swp_entry_t entry)
+ 		memcg_memory_event(memcg, MEMCG_SWAP_MAX);
+ 		memcg_memory_event(memcg, MEMCG_SWAP_FAIL);
+ 		mem_cgroup_id_put(memcg);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Get references for the tail pages, too */
+diff --git a/mm/memfd.c b/mm/memfd.c
+index 2647c8989..c880ac7fd 100644
+--- a/mm/memfd.c
++++ b/mm/memfd.c
+@@ -276,7 +276,7 @@ SYSCALL_DEFINE2(memfd_create,
+ 
+ 	name = kmalloc(len + MFD_NAME_PREFIX_LEN, GFP_KERNEL);
+ 	if (!name)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	strcpy(name, MFD_NAME_PREFIX);
+ 	if (copy_from_user(&name[MFD_NAME_PREFIX_LEN], uname, len)) {
+diff --git a/mm/memory.c b/mm/memory.c
+index 3ecad5510..884859c9e 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -424,7 +424,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
+ 	spinlock_t *ptl;
+ 	pgtable_t new = pte_alloc_one(mm);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * Ensure all pte setup (eg. pte page lock and page clearing) are
+@@ -457,7 +457,7 @@ int __pte_alloc_kernel(pmd_t *pmd)
+ {
+ 	pte_t *new = pte_alloc_one_kernel(&init_mm);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	smp_wmb(); /* See comment in __pte_alloc */
+ 
+@@ -824,7 +824,7 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+ 
+ 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+ 	if (!dst_pte)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	src_pte = pte_offset_map(src_pmd, addr);
+ 	src_ptl = pte_lockptr(src_mm, src_pmd);
+ 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+@@ -863,7 +863,7 @@ static int copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+ 
+ 	if (entry.val) {
+ 		if (add_swap_count_continuation(entry, GFP_KERNEL) < 0)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		progress = 0;
+ 	}
+ 	if (addr != end)
+@@ -880,7 +880,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 
+ 	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+ 	if (!dst_pmd)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	src_pmd = pmd_offset(src_pud, addr);
+ 	do {
+ 		next = pmd_addr_end(addr, end);
+@@ -891,7 +891,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 			err = copy_huge_pmd(dst_mm, src_mm,
+ 					    dst_pmd, src_pmd, addr, vma);
+ 			if (err == -ENOMEM)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 			if (!err)
+ 				continue;
+ 			/* fall through */
+@@ -900,7 +900,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 			continue;
+ 		if (copy_pte_range(dst_mm, src_mm, dst_pmd, src_pmd,
+ 						vma, addr, next))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
+ 	return 0;
+ }
+@@ -914,7 +914,7 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 
+ 	dst_pud = pud_alloc(dst_mm, dst_p4d, addr);
+ 	if (!dst_pud)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	src_pud = pud_offset(src_p4d, addr);
+ 	do {
+ 		next = pud_addr_end(addr, end);
+@@ -925,7 +925,7 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 			err = copy_huge_pud(dst_mm, src_mm,
+ 					    dst_pud, src_pud, addr, vma);
+ 			if (err == -ENOMEM)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 			if (!err)
+ 				continue;
+ 			/* fall through */
+@@ -934,7 +934,7 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 			continue;
+ 		if (copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud,
+ 						vma, addr, next))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (dst_pud++, src_pud++, addr = next, addr != end);
+ 	return 0;
+ }
+@@ -948,7 +948,7 @@ static inline int copy_p4d_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 
+ 	dst_p4d = p4d_alloc(dst_mm, dst_pgd, addr);
+ 	if (!dst_p4d)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	src_p4d = p4d_offset(src_pgd, addr);
+ 	do {
+ 		next = p4d_addr_end(addr, end);
+@@ -956,7 +956,7 @@ static inline int copy_p4d_range(struct mm_struct *dst_mm, struct mm_struct *src
+ 			continue;
+ 		if (copy_pud_range(dst_mm, src_mm, dst_p4d, src_p4d,
+ 						vma, addr, next))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (dst_p4d++, src_p4d++, addr = next, addr != end);
+ 	return 0;
+ }
+@@ -1996,7 +1996,7 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
+ 
+ 	pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
+ 	if (!pte)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	arch_enter_lazy_mmu_mode();
+ 	do {
+ 		BUG_ON(!pte_none(*pte));
+@@ -2023,7 +2023,7 @@ static inline int remap_pmd_range(struct mm_struct *mm, pud_t *pud,
+ 	pfn -= addr >> PAGE_SHIFT;
+ 	pmd = pmd_alloc(mm, pud, addr);
+ 	if (!pmd)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	VM_BUG_ON(pmd_trans_huge(*pmd));
+ 	do {
+ 		next = pmd_addr_end(addr, end);
+@@ -2046,7 +2046,7 @@ static inline int remap_pud_range(struct mm_struct *mm, p4d_t *p4d,
+ 	pfn -= addr >> PAGE_SHIFT;
+ 	pud = pud_alloc(mm, p4d, addr);
+ 	if (!pud)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		next = pud_addr_end(addr, end);
+ 		err = remap_pmd_range(mm, pud, addr, next,
+@@ -2068,7 +2068,7 @@ static inline int remap_p4d_range(struct mm_struct *mm, pgd_t *pgd,
+ 	pfn -= addr >> PAGE_SHIFT;
+ 	p4d = p4d_alloc(mm, pgd, addr);
+ 	if (!p4d)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		next = p4d_addr_end(addr, end);
+ 		err = remap_pud_range(mm, p4d, addr, next,
+@@ -2212,7 +2212,7 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
+ 			pte_alloc_kernel(pmd, addr) :
+ 			pte_alloc_map_lock(mm, pmd, addr, &ptl);
+ 		if (!pte)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} else {
+ 		pte = (mm == &init_mm) ?
+ 			pte_offset_kernel(pmd, addr) :
+@@ -2251,7 +2251,7 @@ static int apply_to_pmd_range(struct mm_struct *mm, pud_t *pud,
+ 	if (create) {
+ 		pmd = pmd_alloc(mm, pud, addr);
+ 		if (!pmd)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} else {
+ 		pmd = pmd_offset(pud, addr);
+ 	}
+@@ -2278,7 +2278,7 @@ static int apply_to_pud_range(struct mm_struct *mm, p4d_t *p4d,
+ 	if (create) {
+ 		pud = pud_alloc(mm, p4d, addr);
+ 		if (!pud)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} else {
+ 		pud = pud_offset(p4d, addr);
+ 	}
+@@ -2305,7 +2305,7 @@ static int apply_to_p4d_range(struct mm_struct *mm, pgd_t *pgd,
+ 	if (create) {
+ 		p4d = p4d_alloc(mm, pgd, addr);
+ 		if (!p4d)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} else {
+ 		p4d = p4d_offset(pgd, addr);
+ 	}
+@@ -4418,7 +4418,7 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+ {
+ 	p4d_t *new = p4d_alloc_one(mm, address);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	smp_wmb(); /* See comment in __pte_alloc */
+ 
+@@ -4441,7 +4441,7 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
+ {
+ 	pud_t *new = pud_alloc_one(mm, address);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	smp_wmb(); /* See comment in __pte_alloc */
+ 
+@@ -4466,7 +4466,7 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
+ 	spinlock_t *ptl;
+ 	pmd_t *new = pmd_alloc_one(mm, address);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	smp_wmb(); /* See comment in __pte_alloc */
+ 
+@@ -4645,7 +4645,7 @@ int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
+ 
+ 	maddr = ioremap_prot(phys_addr, PAGE_ALIGN(len + offset), prot);
+ 	if (!maddr)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (write)
+ 		memcpy_toio(maddr + offset, buf, len);
+diff --git a/mm/mempolicy.c b/mm/mempolicy.c
+index 381320671..10bf82d95 100644
+--- a/mm/mempolicy.c
++++ b/mm/mempolicy.c
+@@ -867,7 +867,7 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
+ 	int ret;
+ 
+ 	if (!scratch)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	new = mpol_new(mode, flags, nodes);
+ 	if (IS_ERR(new)) {
+@@ -1538,7 +1538,7 @@ static int kernel_migrate_pages(pid_t pid, unsigned long maxnode,
+ 	NODEMASK_SCRATCH(scratch);
+ 
+ 	if (!scratch)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	old = &scratch->mask1;
+ 	new = &scratch->mask2;
+@@ -2731,7 +2731,7 @@ int mpol_set_shared_policy(struct shared_policy *info,
+ 	if (npol) {
+ 		new = sp_alloc(vma->vm_pgoff, vma->vm_pgoff + sz, npol);
+ 		if (!new)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	err = shared_policy_replace(info, vma->vm_pgoff, vma->vm_pgoff+sz, new);
+ 	if (err && new)
+diff --git a/mm/mempool.c b/mm/mempool.c
+index 85efab3da..d7f8d0981 100644
+--- a/mm/mempool.c
++++ b/mm/mempool.c
+@@ -191,7 +191,7 @@ int mempool_init_node(mempool_t *pool, int min_nr, mempool_alloc_t *alloc_fn,
+ 	pool->elements = kmalloc_array_node(min_nr, sizeof(void *),
+ 					    gfp_mask, node_id);
+ 	if (!pool->elements)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * First pre-allocate the guaranteed number of buffers.
+@@ -202,7 +202,7 @@ int mempool_init_node(mempool_t *pool, int min_nr, mempool_alloc_t *alloc_fn,
+ 		element = pool->alloc(gfp_mask, pool->pool_data);
+ 		if (unlikely(!element)) {
+ 			mempool_exit(pool);
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 		add_element(pool, element);
+ 	}
+@@ -322,7 +322,7 @@ int mempool_resize(mempool_t *pool, int new_min_nr)
+ 	new_elements = kmalloc_array(new_min_nr, sizeof(*new_elements),
+ 				     GFP_KERNEL);
+ 	if (!new_elements)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	spin_lock_irqsave(&pool->lock, flags);
+ 	if (unlikely(new_min_nr <= pool->min_nr)) {
+diff --git a/mm/migrate.c b/mm/migrate.c
+index 40cd7016a..9988e617b 100644
+--- a/mm/migrate.c
++++ b/mm/migrate.c
+@@ -1174,7 +1174,7 @@ static int unmap_and_move(new_page_t get_new_page,
+ 	struct page *newpage = NULL;
+ 
+ 	if (!thp_migration_supported() && PageTransHuge(page))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (page_count(page) == 1) {
+ 		/* page was freed from under us. So we are done. */
+@@ -1191,7 +1191,7 @@ static int unmap_and_move(new_page_t get_new_page,
+ 
+ 	newpage = get_new_page(page, private);
+ 	if (!newpage)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	rc = __unmap_and_move(page, newpage, force, mode);
+ 	if (rc == MIGRATEPAGE_SUCCESS)
+@@ -1300,7 +1300,7 @@ static int unmap_and_move_huge_page(new_page_t get_new_page,
+ 
+ 	new_hpage = get_new_page(hpage, private);
+ 	if (!new_hpage)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (!trylock_page(hpage)) {
+ 		if (!force)
+diff --git a/mm/mincore.c b/mm/mincore.c
+index 453ff1124..6f4486bfc 100644
+--- a/mm/mincore.c
++++ b/mm/mincore.c
+@@ -213,7 +213,7 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
+ 
+ 	vma = find_vma(current->mm, addr);
+ 	if (!vma || addr < vma->vm_start)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	end = min(vma->vm_end, addr + (pages << PAGE_SHIFT));
+ 	if (!can_do_mincore(vma)) {
+ 		unsigned long pages = DIV_ROUND_UP(end - addr, PAGE_SIZE);
+@@ -265,7 +265,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
+ 
+ 	/* ..and we need to be passed a valid user-space range */
+ 	if (!access_ok((void __user *) start, len))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* This also avoids any overflows on PAGE_ALIGN */
+ 	pages = len >> PAGE_SHIFT;
+diff --git a/mm/mlock.c b/mm/mlock.c
+index f8736136f..b65e02ad2 100644
+--- a/mm/mlock.c
++++ b/mm/mlock.c
+@@ -596,7 +596,7 @@ static int apply_vma_lock_flags(unsigned long start, size_t len,
+ 		return 0;
+ 	vma = find_vma(current->mm, start);
+ 	if (!vma || vma->vm_start > start)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	prev = vma->vm_prev;
+ 	if (start > vma->vm_start)
+diff --git a/mm/mm_init.c b/mm/mm_init.c
+index 435e5f794..6e0c7c268 100644
+--- a/mm/mm_init.c
++++ b/mm/mm_init.c
+@@ -190,7 +190,7 @@ static int __init mm_sysfs_init(void)
+ {
+ 	mm_kobj = kobject_create_and_add("mm", kernel_kobj);
+ 	if (!mm_kobj)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	return 0;
+ }
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 9c99996c6..6cb898721 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -544,7 +544,7 @@ static int find_vma_links(struct mm_struct *mm, unsigned long addr,
+ 		if (vma_tmp->vm_end > addr) {
+ 			/* Fail if an existing vma overlaps the area */
+ 			if (vma_tmp->vm_start < end)
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 			__rb_link = &__rb_parent->rb_left;
+ 		} else {
+ 			rb_prev = __rb_parent;
+@@ -1397,7 +1397,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
+ 	/* Careful about overflows.. */
+ 	len = PAGE_ALIGN(len);
+ 	if (!len)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* offset overflow? */
+ 	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff)
+@@ -1405,7 +1405,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
+ 
+ 	/* Too many mappings? */
+ 	if (mm->map_count > sysctl_max_map_count)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Obtain the address to map to. we verify (or select) it and ensure
+ 	 * that it represents a valid section of the address space.
+@@ -1706,14 +1706,14 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
+ 
+ 		if (!may_expand_vm(mm, vm_flags,
+ 					(len >> PAGE_SHIFT) - nr_pages))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Clear old maps */
+ 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
+ 			      &rb_parent)) {
+ 		if (do_munmap(mm, addr, len, uf))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/*
+@@ -1868,15 +1868,15 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
+ 	/* Adjust search length to account for worst case alignment overhead */
+ 	length = info->length + info->align_mask;
+ 	if (length < info->length)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Adjust search limits by the desired length */
+ 	if (info->high_limit < length)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	high_limit = info->high_limit - length;
+ 
+ 	if (info->low_limit > high_limit)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	low_limit = info->low_limit + length;
+ 
+ 	/* Check if rbtree root looks promising */
+@@ -1903,7 +1903,7 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
+ check_current:
+ 		/* Check if current node has a suitable gap */
+ 		if (gap_start > high_limit)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		if (gap_end >= low_limit &&
+ 		    gap_end > gap_start && gap_end - gap_start >= length)
+ 			goto found;
+@@ -1939,7 +1939,7 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
+ 	gap_start = mm->highest_vm_end;
+ 	gap_end = ULONG_MAX;  /* Only for VM_BUG_ON below */
+ 	if (gap_start > high_limit)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ found:
+ 	/* We found a suitable gap. Clip it with the original low_limit. */
+@@ -1963,7 +1963,7 @@ static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+ 	/* Adjust search length to account for worst case alignment overhead */
+ 	length = info->length + info->align_mask;
+ 	if (length < info->length)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * Adjust search limits by the desired length.
+@@ -1971,11 +1971,11 @@ static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+ 	 */
+ 	gap_end = info->high_limit;
+ 	if (gap_end < length)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	high_limit = gap_end - length;
+ 
+ 	if (info->low_limit > high_limit)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	low_limit = info->low_limit + length;
+ 
+ 	/* Check highest gap, which does not precede any rbtree node */
+@@ -1985,10 +1985,10 @@ static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+ 
+ 	/* Check if rbtree root looks promising */
+ 	if (RB_EMPTY_ROOT(&mm->mm_rb))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	vma = rb_entry(mm->mm_rb.rb_node, struct vm_area_struct, vm_rb);
+ 	if (vma->rb_subtree_gap < length)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	while (true) {
+ 		/* Visit right subtree if it looks promising */
+@@ -2007,7 +2007,7 @@ static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+ 		/* Check if current node has a suitable gap */
+ 		gap_end = vm_start_gap(vma);
+ 		if (gap_end < low_limit)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		if (gap_start <= high_limit &&
+ 		    gap_end > gap_start && gap_end - gap_start >= length)
+ 			goto found;
+@@ -2027,7 +2027,7 @@ static unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
+ 		while (true) {
+ 			struct rb_node *prev = &vma->vm_rb;
+ 			if (!rb_parent(prev))
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 			vma = rb_entry(rb_parent(prev),
+ 				       struct vm_area_struct, vm_rb);
+ 			if (prev == vma->vm_rb.rb_right) {
+@@ -2105,7 +2105,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+ 	const unsigned long mmap_end = arch_get_mmap_end(addr);
+ 
+ 	if (len > mmap_end - mmap_min_addr)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (flags & MAP_FIXED)
+ 		return addr;
+@@ -2146,7 +2146,7 @@ arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
+ 
+ 	/* requested length too big for entire address space */
+ 	if (len > mmap_end - mmap_min_addr)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (flags & MAP_FIXED)
+ 		return addr;
+@@ -2200,7 +2200,7 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
+ 
+ 	/* Careful about overflows.. */
+ 	if (len > TASK_SIZE)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	get_area = current->mm->get_unmapped_area;
+ 	if (file) {
+@@ -2221,7 +2221,7 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
+ 		return addr;
+ 
+ 	if (addr > TASK_SIZE - len)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	if (offset_in_page(addr))
+ 		return -EINVAL;
+ 
+@@ -2298,11 +2298,11 @@ static int acct_stack_growth(struct vm_area_struct *vma,
+ 
+ 	/* address space limit tests */
+ 	if (!may_expand_vm(mm, vma->vm_flags, grow))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Stack limit test */
+ 	if (size > rlimit(RLIMIT_STACK))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* mlock limit tests */
+ 	if (vma->vm_flags & VM_LOCKED) {
+@@ -2312,7 +2312,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
+ 		limit = rlimit(RLIMIT_MEMLOCK);
+ 		limit >>= PAGE_SHIFT;
+ 		if (locked > limit && !capable(CAP_IPC_LOCK))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Check to ensure the stack will not grow into a hugetlb-only region */
+@@ -2326,7 +2326,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
+ 	 * update security statistics.
+ 	 */
+ 	if (security_vm_enough_memory_mm(mm, grow))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	return 0;
+ }
+@@ -2349,7 +2349,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
+ 	/* Guard against exceeding limits of the address space. */
+ 	address &= PAGE_MASK;
+ 	if (address >= (TASK_SIZE & PAGE_MASK))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	address += PAGE_SIZE;
+ 
+ 	/* Enforce stack_guard_gap */
+@@ -2362,13 +2362,13 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
+ 	next = vma->vm_next;
+ 	if (next && next->vm_start < gap_addr && vma_is_accessible(next)) {
+ 		if (!(next->vm_flags & VM_GROWSUP))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		/* Check that both stack segments have the same anon_vma? */
+ 	}
+ 
+ 	/* We must make sure the anon_vma is allocated. */
+ 	if (unlikely(anon_vma_prepare(vma)))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * vma->vm_start/vm_end cannot change under us because the caller
+@@ -2443,12 +2443,12 @@ int expand_downwards(struct vm_area_struct *vma,
+ 	if (prev && !(prev->vm_flags & VM_GROWSDOWN) &&
+ 			vma_is_accessible(prev)) {
+ 		if (address - prev->vm_end < stack_guard_gap)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* We must make sure the anon_vma is allocated. */
+ 	if (unlikely(anon_vma_prepare(vma)))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * vma->vm_start/vm_end cannot change under us because the caller
+@@ -2677,7 +2677,7 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
+ 
+ 	new = vm_area_dup(vma);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (new_below)
+ 		new->vm_end = addr;
+@@ -2731,7 +2731,7 @@ int split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	      unsigned long addr, int new_below)
+ {
+ 	if (mm->map_count >= sysctl_max_map_count)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	return __split_vma(mm, vma, addr, new_below);
+ }
+@@ -2789,7 +2789,7 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
+ 		 * its limit temporarily, to help free resources as expected.
+ 		 */
+ 		if (end < vma->vm_end && mm->map_count >= sysctl_max_map_count)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 		error = __split_vma(mm, vma, start, 0);
+ 		if (error)
+@@ -3028,18 +3028,18 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
+ 	while (find_vma_links(mm, addr, addr + len, &prev, &rb_link,
+ 			      &rb_parent)) {
+ 		if (do_munmap(mm, addr, len, uf))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Check against address space limits *after* clearing old maps... */
+ 	if (!may_expand_vm(mm, flags, len >> PAGE_SHIFT))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (mm->map_count > sysctl_max_map_count)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (security_vm_enough_memory_mm(mm, len >> PAGE_SHIFT))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Can we just expand an old private anonymous mapping? */
+ 	vma = vma_merge(mm, prev, addr, addr + len, flags,
+@@ -3053,7 +3053,7 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
+ 	vma = vm_area_alloc(mm);
+ 	if (!vma) {
+ 		vm_unacct_memory(len >> PAGE_SHIFT);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	vma_set_anonymous(vma);
+@@ -3083,7 +3083,7 @@ int vm_brk_flags(unsigned long addr, unsigned long request, unsigned long flags)
+ 
+ 	len = PAGE_ALIGN(request);
+ 	if (len < request)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	if (!len)
+ 		return 0;
+ 
+@@ -3187,10 +3187,10 @@ int insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
+ 
+ 	if (find_vma_links(mm, vma->vm_start, vma->vm_end,
+ 			   &prev, &rb_link, &rb_parent))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	if ((vma->vm_flags & VM_ACCOUNT) &&
+ 	     security_vm_enough_memory_mm(mm, vma_pages(vma)))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * The vm_pgoff of a purely anonymous vma should be irrelevant
+diff --git a/mm/mmap.c.rej b/mm/mmap.c.rej
+new file mode 100644
+index 000000000..eeca9a025
+--- /dev/null
++++ b/mm/mmap.c.rej
+@@ -0,0 +1,11 @@
++--- mm/mmap.c
+++++ mm/mmap.c
++@@ -1722,7 +1722,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
++        if (accountable_mapping(file, vm_flags)) {
++                charged = len >> PAGE_SHIFT;
++                if (security_vm_enough_memory_mm(mm, charged)){
++-                       dump_stack();
+++                       ENOMEM_DUMPER(sysctl_error_barf);
++                        return -ENOMEM;
++                }
++                vm_flags |= VM_ACCOUNT;
+diff --git a/mm/mmu_notifier.c b/mm/mmu_notifier.c
+index 352bb9f3e..385c2e935 100644
+--- a/mm/mmu_notifier.c
++++ b/mm/mmu_notifier.c
+@@ -628,7 +628,7 @@ int __mmu_notifier_register(struct mmu_notifier *subscription,
+ 		subscriptions = kzalloc(
+ 			sizeof(struct mmu_notifier_subscriptions), GFP_KERNEL);
+ 		if (!subscriptions)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 		INIT_HLIST_HEAD(&subscriptions->list);
+ 		spin_lock_init(&subscriptions->lock);
+diff --git a/mm/mprotect.c b/mm/mprotect.c
+index ce8b8a5ea..144affc9e 100644
+--- a/mm/mprotect.c
++++ b/mm/mprotect.c
+@@ -438,12 +438,12 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
+ 		/* Check space limits when area turns into data. */
+ 		if (!may_expand_vm(mm, newflags, nrpages) &&
+ 				may_expand_vm(mm, oldflags, nrpages))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		if (!(oldflags & (VM_ACCOUNT|VM_WRITE|VM_HUGETLB|
+ 						VM_SHARED|VM_NORESERVE))) {
+ 			charged = nrpages;
+ 			if (security_vm_enough_memory_mm(mm, charged))
+-				return -ENOMEM;
++				ENOMEM_DUMPER(sysctl_error_barf);
+ 			newflags |= VM_ACCOUNT;
+ 		}
+ 	}
+@@ -532,7 +532,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
+ 	len = PAGE_ALIGN(len);
+ 	end = start + len;
+ 	if (end <= start)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	if (!arch_validate_prot(prot, start))
+ 		return -EINVAL;
+ 
+diff --git a/mm/mremap.c b/mm/mremap.c
+index 6b153dc05..76030fd1c 100644
+--- a/mm/mremap.c
++++ b/mm/mremap.c
+@@ -356,7 +356,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
+ 	 * which may split one vma into three before unmapping.
+ 	 */
+ 	if (mm->map_count >= sysctl_max_map_count - 3)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/*
+ 	 * Advise KSM to break any KSM pages in the area to be moved:
+@@ -374,7 +374,7 @@ static unsigned long move_vma(struct vm_area_struct *vma,
+ 	new_vma = copy_vma(&vma, new_addr, new_len, new_pgoff,
+ 			   &need_rmap_locks);
+ 	if (!new_vma)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	moved_len = move_page_tables(vma, old_addr, new_vma, new_addr, old_len,
+ 				     need_rmap_locks);
+@@ -583,7 +583,7 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
+ 	 * the threshold, otherwise return -ENOMEM here to be more safe.
+ 	 */
+ 	if ((mm->map_count + 2) >= sysctl_max_map_count - 3)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (flags & MREMAP_FIXED) {
+ 		ret = do_munmap(mm, new_addr, new_len, uf_unmap_early);
+diff --git a/mm/nommu.c b/mm/nommu.c
+index f32a69095..00bbaf920 100644
+--- a/mm/nommu.c
++++ b/mm/nommu.c
+@@ -720,7 +720,7 @@ struct vm_area_struct *find_extend_vma(struct mm_struct *mm, unsigned long addr)
+  */
+ int expand_stack(struct vm_area_struct *vma, unsigned long address)
+ {
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -784,7 +784,7 @@ static int validate_mmap_request(struct file *file,
+ 	/* Careful about overflows.. */
+ 	rlen = PAGE_ALIGN(len);
+ 	if (!rlen || rlen > TASK_SIZE)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* offset overflow? */
+ 	if ((pgoff + (rlen >> PAGE_SHIFT)) < pgoff)
+@@ -1067,7 +1067,7 @@ static int do_mmap_private(struct vm_area_struct *vma,
+ 	pr_err("Allocation of length %lu from process %d (%s) failed\n",
+ 	       len, current->pid, current->comm);
+ 	show_free_areas(0, NULL);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -1290,13 +1290,13 @@ unsigned long do_mmap(struct file *file,
+ 	pr_warn("Allocation of vma for %lu byte allocation from process %d failed\n",
+ 			len, current->pid);
+ 	show_free_areas(0, NULL);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ error_getting_region:
+ 	pr_warn("Allocation of vm region for %lu byte allocation from process %d failed\n",
+ 			len, current->pid);
+ 	show_free_areas(0, NULL);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
+@@ -1368,19 +1368,19 @@ int split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	/* we're only permitted to split anonymous regions (these should have
+ 	 * only a single usage on the region) */
+ 	if (vma->vm_file)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (mm->map_count >= sysctl_max_map_count)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	region = kmem_cache_alloc(vm_region_jar, GFP_KERNEL);
+ 	if (!region)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	new = vm_area_dup(vma);
+ 	if (!new) {
+ 		kmem_cache_free(vm_region_jar, region);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* most fields are the same, copy all, and then fixup */
+@@ -1559,7 +1559,7 @@ void exit_mmap(struct mm_struct *mm)
+ 
+ int vm_brk(unsigned long addr, unsigned long len)
+ {
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -1665,7 +1665,7 @@ EXPORT_SYMBOL(remap_vmalloc_range);
+ unsigned long arch_get_unmapped_area(struct file *file, unsigned long addr,
+ 	unsigned long len, unsigned long pgoff, unsigned long flags)
+ {
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ vm_fault_t filemap_fault(struct vm_fault *vmf)
+diff --git a/mm/page_ext.c b/mm/page_ext.c
+index a3616f7a0..21a5b529e 100644
+--- a/mm/page_ext.c
++++ b/mm/page_ext.c
+@@ -157,7 +157,7 @@ static int __init alloc_node_page_ext(int nid)
+ 			table_size, PAGE_SIZE, __pa(MAX_DMA_ADDRESS),
+ 			MEMBLOCK_ALLOC_ACCESSIBLE, nid);
+ 	if (!base)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	NODE_DATA(nid)->node_page_ext = base;
+ 	total_usage += table_size;
+ 	return 0;
+@@ -241,7 +241,7 @@ static int __meminit init_section_page_ext(unsigned long pfn, int nid)
+ 
+ 	if (!base) {
+ 		pr_err("page ext allocation failure\n");
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/*
+@@ -312,7 +312,7 @@ static int __meminit online_page_ext(unsigned long start_pfn,
+ 	for (pfn = start; pfn < end; pfn += PAGES_PER_SECTION)
+ 		__free_page_ext(pfn);
+ 
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static int __meminit offline_page_ext(unsigned long start_pfn,
+diff --git a/mm/page_owner.c b/mm/page_owner.c
+index 360461509..27b6820fa 100644
+--- a/mm/page_owner.c
++++ b/mm/page_owner.c
+@@ -346,7 +346,7 @@ print_page_owner(char __user *buf, size_t count, unsigned long pfn,
+ 	count = min_t(size_t, count, PAGE_SIZE);
+ 	kbuf = kmalloc(count, GFP_KERNEL);
+ 	if (!kbuf)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	ret = snprintf(kbuf, count,
+ 			"Page allocated via order %u, mask %#x(%pGg)\n",
+@@ -395,7 +395,7 @@ print_page_owner(char __user *buf, size_t count, unsigned long pfn,
+ 
+ err:
+ 	kfree(kbuf);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ void __dump_page_owner(struct page *page)
+diff --git a/mm/percpu-stats.c b/mm/percpu-stats.c
+index 32558063c..bdc75f289 100644
+--- a/mm/percpu-stats.c
++++ b/mm/percpu-stats.c
+@@ -146,7 +146,7 @@ static int percpu_stats_show(struct seq_file *m, void *v)
+ 	/* there can be at most this many free and allocated fragments */
+ 	buffer = vmalloc(array_size(sizeof(int), (2 * max_nr_alloc + 1)));
+ 	if (!buffer)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	spin_lock_irq(&pcpu_lock);
+ 
+diff --git a/mm/percpu-vm.c b/mm/percpu-vm.c
+index a2b395ace..536ca5291 100644
+--- a/mm/percpu-vm.c
++++ b/mm/percpu-vm.c
+@@ -108,7 +108,7 @@ static int pcpu_alloc_pages(struct pcpu_chunk *chunk,
+ 		for (i = page_start; i < page_end; i++)
+ 			__free_page(pages[pcpu_page_idx(tcpu, i)]);
+ 	}
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /**
+@@ -279,14 +279,14 @@ static int pcpu_populate_chunk(struct pcpu_chunk *chunk,
+ 
+ 	pages = pcpu_get_pages();
+ 	if (!pages)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (pcpu_alloc_pages(chunk, pages, page_start, page_end, gfp))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (pcpu_map_pages(chunk, pages, page_start, page_end)) {
+ 		pcpu_free_pages(chunk, pages, page_start, page_end);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	pcpu_post_map_flush(chunk, page_start, page_end);
+ 
+diff --git a/mm/process_vm_access.c b/mm/process_vm_access.c
+index cc85ce819..1cb944087 100644
+--- a/mm/process_vm_access.c
++++ b/mm/process_vm_access.c
+@@ -192,7 +192,7 @@ static ssize_t process_vm_rw_core(pid_t pid, struct iov_iter *iter,
+ 					GFP_KERNEL);
+ 
+ 		if (!process_pages)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	/* Get process information */
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 5fe2dedce..bc18c779b 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -224,7 +224,7 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
+  out_enomem_free_avc:
+ 	anon_vma_chain_free(avc);
+  out_enomem:
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -317,7 +317,7 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
+ 	 */
+ 	dst->anon_vma = NULL;
+ 	unlink_anon_vmas(dst);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /*
+@@ -383,7 +383,7 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
+ 	put_anon_vma(anon_vma);
+  out_error:
+ 	unlink_anon_vmas(vma);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ void unlink_anon_vmas(struct vm_area_struct *vma)
+diff --git a/mm/shmem.c b/mm/shmem.c
+index b2abca3f7..8f4484199 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -1575,7 +1575,7 @@ static int shmem_replace_page(struct page **pagep, gfp_t gfp,
+ 	gfp &= ~GFP_CONSTRAINT_MASK;
+ 	newpage = shmem_alloc_page(gfp, info, index);
+ 	if (!newpage)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	get_page(newpage);
+ 	copy_highpage(newpage, oldpage);
+@@ -2061,7 +2061,7 @@ unsigned long shmem_get_unmapped_area(struct file *file,
+ 	unsigned long inflated_offset;
+ 
+ 	if (len > TASK_SIZE)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	get_area = current->mm->get_unmapped_area;
+ 	addr = get_area(file, uaddr, len, pgoff, flags);
+@@ -3000,7 +3000,7 @@ static int shmem_whiteout(struct inode *old_dir, struct dentry *old_dentry)
+ 
+ 	whiteout = d_alloc(old_dentry->d_parent, &old_dentry->d_name);
+ 	if (!whiteout)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	error = shmem_mknod(old_dir, whiteout,
+ 			    S_IFCHR | WHITEOUT_MODE, WHITEOUT_DEV);
+@@ -3094,7 +3094,7 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
+ 		inode->i_link = kmemdup(symname, len, GFP_KERNEL);
+ 		if (!inode->i_link) {
+ 			iput(inode);
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 		inode->i_op = &shmem_short_symlink_operations;
+ 	} else {
+@@ -3172,14 +3172,14 @@ static int shmem_initxattrs(struct inode *inode,
+ 	for (xattr = xattr_array; xattr->name != NULL; xattr++) {
+ 		new_xattr = simple_xattr_alloc(xattr->value, xattr->value_len);
+ 		if (!new_xattr)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 		len = strlen(xattr->name) + 1;
+ 		new_xattr->name = kmalloc(XATTR_SECURITY_PREFIX_LEN + len,
+ 					  GFP_KERNEL);
+ 		if (!new_xattr->name) {
+ 			kvfree(new_xattr);
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 
+ 		memcpy(new_xattr->name, XATTR_SECURITY_PREFIX,
+@@ -3601,7 +3601,7 @@ static int shmem_fill_super(struct super_block *sb, struct fs_context *fc)
+ 	sbinfo = kzalloc(max((int)sizeof(struct shmem_sb_info),
+ 				L1_CACHE_BYTES), GFP_KERNEL);
+ 	if (!sbinfo)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	sb->s_fs_info = sbinfo;
+ 
+@@ -3835,7 +3835,7 @@ int shmem_init_fs_context(struct fs_context *fc)
+ 
+ 	ctx = kzalloc(sizeof(struct shmem_options), GFP_KERNEL);
+ 	if (!ctx)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	ctx->mode = 0777 | S_ISVTX;
+ 	ctx->uid = current_fsuid();
+diff --git a/mm/slab.c b/mm/slab.c
+index 9350062ff..6b3ecf445 100644
+--- a/mm/slab.c
++++ b/mm/slab.c
+@@ -825,7 +825,7 @@ static int init_cache_node(struct kmem_cache *cachep, int node, gfp_t gfp)
+ 
+ 	n = kmalloc_node(sizeof(struct kmem_cache_node), gfp, node);
+ 	if (!n)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	kmem_cache_node_init(n);
+ 	n->next_reap = jiffies + REAPTIMEOUT_NODE +
+@@ -1032,7 +1032,7 @@ static int cpuup_prepare(long cpu)
+ 	return 0;
+ bad:
+ 	cpuup_canceled(cpu);
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ int slab_prepare_cpu(unsigned int cpu)
+@@ -3792,7 +3792,7 @@ static int setup_kmem_cache_nodes(struct kmem_cache *cachep, gfp_t gfp)
+ 			node--;
+ 		}
+ 	}
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /* Always called with the slab_mutex held */
+@@ -3804,7 +3804,7 @@ static int __do_tune_cpucache(struct kmem_cache *cachep, int limit,
+ 
+ 	cpu_cache = alloc_kmem_cache_cpus(cachep, limit, batchcount);
+ 	if (!cpu_cache)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	prev = cachep->cpu_cache;
+ 	cachep->cpu_cache = cpu_cache;
+diff --git a/mm/slab_common.c b/mm/slab_common.c
+index fe8b68482..a98173302 100644
+--- a/mm/slab_common.c
++++ b/mm/slab_common.c
+@@ -170,7 +170,7 @@ static int init_memcg_params(struct kmem_cache *s,
+ 		       memcg_nr_cache_ids * sizeof(void *),
+ 		       GFP_KERNEL);
+ 	if (!arr)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	RCU_INIT_POINTER(s->memcg_params.memcg_caches, arr);
+ 	return 0;
+@@ -202,7 +202,7 @@ static int update_memcg_params(struct kmem_cache *s, int new_array_size)
+ 	new = kvzalloc(sizeof(struct memcg_cache_array) +
+ 		       new_array_size * sizeof(void *), GFP_KERNEL);
+ 	if (!new)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	old = rcu_dereference_protected(s->memcg_params.memcg_caches,
+ 					lockdep_is_held(&slab_mutex));
+@@ -1396,7 +1396,7 @@ int cache_random_seq_create(struct kmem_cache *cachep, unsigned int count,
+ 
+ 	cachep->random_seq = kcalloc(count, sizeof(unsigned int), gfp);
+ 	if (!cachep->random_seq)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Get best entropy at this stage of boot */
+ 	prandom_seed_state(&state, get_random_long());
+@@ -1809,7 +1809,7 @@ EXPORT_TRACEPOINT_SYMBOL(kmem_cache_free);
+ int should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+ {
+ 	if (__should_failslab(s, gfpflags))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	return 0;
+ }
+ ALLOW_ERROR_INJECTION(should_failslab, ERRNO);
+diff --git a/mm/slub.c b/mm/slub.c
+index ef303070d..526388e0a 100644
+--- a/mm/slub.c
++++ b/mm/slub.c
+@@ -4874,7 +4874,7 @@ static ssize_t show_slab_objects(struct kmem_cache *s,
+ 
+ 	nodes = kcalloc(nr_node_ids, sizeof(unsigned long), GFP_KERNEL);
+ 	if (!nodes)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (flags & SO_CPU) {
+ 		int cpu;
+@@ -5427,7 +5427,7 @@ static int show_stat(struct kmem_cache *s, char *buf, enum stat_item si)
+ 	int *data = kmalloc_array(nr_cpu_ids, sizeof(int), GFP_KERNEL);
+ 
+ 	if (!data)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	for_each_online_cpu(cpu) {
+ 		unsigned x = per_cpu_ptr(s->cpu_slab, cpu)->stat[si];
+@@ -5907,7 +5907,7 @@ static int sysfs_slab_alias(struct kmem_cache *s, const char *name)
+ 
+ 	al = kmalloc(sizeof(struct saved_alias), GFP_KERNEL);
+ 	if (!al)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	al->s = s;
+ 	al->name = name;
+diff --git a/mm/sparse-vmemmap.c b/mm/sparse-vmemmap.c
+index 0db7738d7..975e48071 100644
+--- a/mm/sparse-vmemmap.c
++++ b/mm/sparse-vmemmap.c
+@@ -225,19 +225,19 @@ int __meminit vmemmap_populate_basepages(unsigned long start,
+ 	for (; addr < end; addr += PAGE_SIZE) {
+ 		pgd = vmemmap_pgd_populate(addr, node);
+ 		if (!pgd)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		p4d = vmemmap_p4d_populate(pgd, addr, node);
+ 		if (!p4d)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		pud = vmemmap_pud_populate(p4d, addr, node);
+ 		if (!pud)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		pmd = vmemmap_pmd_populate(pud, addr, node);
+ 		if (!pmd)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		pte = vmemmap_pte_populate(pmd, addr, node);
+ 		if (!pte)
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		vmemmap_verify(pte, node, addr, addr + PAGE_SIZE);
+ 	}
+ 
+diff --git a/mm/sparse.c b/mm/sparse.c
+index b2b9a3e34..881401889 100644
+--- a/mm/sparse.c
++++ b/mm/sparse.c
+@@ -96,7 +96,7 @@ static int __meminit sparse_index_init(unsigned long section_nr, int nid)
+ 
+ 	section = sparse_index_alloc(nid);
+ 	if (!section)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	mem_section[root] = section;
+ 
+diff --git a/mm/swap_cgroup.c b/mm/swap_cgroup.c
+index 7f34343c0..6d3ec6502 100644
+--- a/mm/swap_cgroup.c
++++ b/mm/swap_cgroup.c
+@@ -59,7 +59,7 @@ static int swap_cgroup_prepare(int type)
+ 	for (idx = 0; idx < max; idx++)
+ 		__free_page(ctrl->map[idx]);
+ 
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ static struct swap_cgroup *__lookup_swap_cgroup(struct swap_cgroup_ctrl *ctrl,
+@@ -197,7 +197,7 @@ int swap_cgroup_swapon(int type, unsigned long max_pages)
+ nomem:
+ 	pr_info("couldn't allocate enough memory for swap_cgroup\n");
+ 	pr_info("swap_cgroup can be disabled by swapaccount=0 boot option\n");
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ void swap_cgroup_swapoff(int type)
+diff --git a/mm/swap_slots.c b/mm/swap_slots.c
+index 0975adc72..0b7e16894 100644
+--- a/mm/swap_slots.c
++++ b/mm/swap_slots.c
+@@ -125,13 +125,13 @@ static int alloc_swap_slot_cache(unsigned int cpu)
+ 	slots = kvcalloc(SWAP_SLOTS_CACHE_SIZE, sizeof(swp_entry_t),
+ 			 GFP_KERNEL);
+ 	if (!slots)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	slots_ret = kvcalloc(SWAP_SLOTS_CACHE_SIZE, sizeof(swp_entry_t),
+ 			     GFP_KERNEL);
+ 	if (!slots_ret) {
+ 		kvfree(slots);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	mutex_lock(&swap_slots_cache_mutex);
+diff --git a/mm/swap_state.c b/mm/swap_state.c
+index 05889e8e3..37e2365e4 100644
+--- a/mm/swap_state.c
++++ b/mm/swap_state.c
+@@ -620,7 +620,7 @@ int init_swap_address_space(unsigned int type, unsigned long nr_pages)
+ 	nr = DIV_ROUND_UP(nr_pages, SWAP_ADDRESS_SPACE_PAGES);
+ 	spaces = kvcalloc(nr, sizeof(struct address_space), GFP_KERNEL);
+ 	if (!spaces)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	for (i = 0; i < nr; i++) {
+ 		space = spaces + i;
+ 		xa_init_flags(&space->i_pages, XA_FLAGS_LOCK_IRQ);
+@@ -844,7 +844,7 @@ static int __init swap_init_sysfs(void)
+ 	swap_kobj = kobject_create_and_add("swap", mm_kobj);
+ 	if (!swap_kobj) {
+ 		pr_err("failed to create swap kobject\n");
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	err = sysfs_create_group(swap_kobj, &swap_attr_group);
+ 	if (err) {
+diff --git a/mm/swapfile.c b/mm/swapfile.c
+index 987276c55..e57d64dcf 100644
+--- a/mm/swapfile.c
++++ b/mm/swapfile.c
+@@ -1898,7 +1898,7 @@ static int unuse_pte(struct vm_area_struct *vma, pmd_t *pmd,
+ 	swapcache = page;
+ 	page = ksm_might_need_to_copy(page, vma, addr);
+ 	if (unlikely(!page))
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
+ 	if (unlikely(!pte_same_as_swp(*pte, swp_entry_to_pte(entry)))) {
+@@ -1974,7 +1974,7 @@ static int unuse_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
+ 		if (!page) {
+ 			if (*swap_map == 0 || *swap_map == SWAP_MAP_BAD)
+ 				goto try_next;
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 
+ 		lock_page(page);
+@@ -2367,7 +2367,7 @@ add_swap_extent(struct swap_info_struct *sis, unsigned long start_page,
+ 	/* No merge, insert a new extent. */
+ 	new_se = kmalloc(sizeof(*se), GFP_KERNEL);
+ 	if (new_se == NULL)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	new_se->start_page = start_page;
+ 	new_se->nr_pages = nr_pages;
+ 	new_se->start_block = start_block;
+@@ -3165,7 +3165,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
+ 		return -EPERM;
+ 
+ 	if (!swap_avail_heads)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	p = alloc_swap_info();
+ 	if (IS_ERR(p))
+@@ -3825,7 +3825,7 @@ static int __init swapfile_init(void)
+ 					 GFP_KERNEL);
+ 	if (!swap_avail_heads) {
+ 		pr_emerg("Not enough memory for swap heads, swap is disabled\n");
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 
+ 	for_each_node(nid)
+diff --git a/mm/util.c b/mm/util.c
+index c63c8e47b..7982589b7 100644
+--- a/mm/util.c
++++ b/mm/util.c
+@@ -849,7 +849,7 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
+ error:
+ 	vm_unacct_memory(pages);
+ 
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ /**
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index 5a2b55c8d..5708fde38 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -201,14 +201,14 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
+ 
+ 	pte = pte_alloc_kernel_track(pmd, addr, mask);
+ 	if (!pte)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		struct page *page = pages[*nr];
+ 
+ 		if (WARN_ON(!pte_none(*pte)))
+ 			return -EBUSY;
+ 		if (WARN_ON(!page))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+ 		(*nr)++;
+ 	} while (pte++, addr += PAGE_SIZE, addr != end);
+@@ -225,11 +225,11 @@ static int vmap_pmd_range(pud_t *pud, unsigned long addr,
+ 
+ 	pmd = pmd_alloc_track(&init_mm, pud, addr, mask);
+ 	if (!pmd)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		next = pmd_addr_end(addr, end);
+ 		if (vmap_pte_range(pmd, addr, next, prot, pages, nr, mask))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (pmd++, addr = next, addr != end);
+ 	return 0;
+ }
+@@ -243,11 +243,11 @@ static int vmap_pud_range(p4d_t *p4d, unsigned long addr,
+ 
+ 	pud = pud_alloc_track(&init_mm, p4d, addr, mask);
+ 	if (!pud)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		next = pud_addr_end(addr, end);
+ 		if (vmap_pmd_range(pud, addr, next, prot, pages, nr, mask))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (pud++, addr = next, addr != end);
+ 	return 0;
+ }
+@@ -261,11 +261,11 @@ static int vmap_p4d_range(pgd_t *pgd, unsigned long addr,
+ 
+ 	p4d = p4d_alloc_track(&init_mm, pgd, addr, mask);
+ 	if (!p4d)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	do {
+ 		next = p4d_addr_end(addr, end);
+ 		if (vmap_pud_range(p4d, addr, next, prot, pages, nr, mask))
+-			return -ENOMEM;
++			ENOMEM_DUMPER(sysctl_error_barf);
+ 	} while (p4d++, addr = next, addr != end);
+ 	return 0;
+ }
+diff --git a/mm/vmpressure.c b/mm/vmpressure.c
+index d69019fc3..a8cb5bc7c 100644
+--- a/mm/vmpressure.c
++++ b/mm/vmpressure.c
+@@ -372,7 +372,7 @@ int vmpressure_register_event(struct mem_cgroup *memcg,
+ 
+ 	spec_orig = spec = kstrndup(args, MAX_VMPRESSURE_ARGS_LEN, GFP_KERNEL);
+ 	if (!spec)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	/* Find required level */
+ 	token = strsep(&spec, ",");
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 749d239c6..0c010d319 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -348,7 +348,7 @@ int prealloc_shrinker(struct shrinker *shrinker)
+ 
+ 	shrinker->nr_deferred = kzalloc(size, GFP_KERNEL);
+ 	if (!shrinker->nr_deferred)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	if (shrinker->flags & SHRINKER_MEMCG_AWARE) {
+ 		if (prealloc_memcg_shrinker(shrinker))
+@@ -360,7 +360,7 @@ int prealloc_shrinker(struct shrinker *shrinker)
+ free_deferred:
+ 	kfree(shrinker->nr_deferred);
+ 	shrinker->nr_deferred = NULL;
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ 
+ void free_prealloced_shrinker(struct shrinker *shrinker)
+diff --git a/mm/z3fold.c b/mm/z3fold.c
+index 460b0fece..66bdf6c94 100644
+--- a/mm/z3fold.c
++++ b/mm/z3fold.c
+@@ -1159,12 +1159,12 @@ static int z3fold_alloc(struct z3fold_pool *pool, size_t size, gfp_t gfp,
+ 		page = alloc_page(gfp);
+ 
+ 	if (!page)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	zhdr = init_z3fold_page(page, bud == HEADLESS, pool, gfp);
+ 	if (!zhdr) {
+ 		__free_page(page);
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	atomic64_inc(&pool->pages_nr);
+ 
+diff --git a/mm/zbud.c b/mm/zbud.c
+index bc93aa4e4..806661cdd 100644
+--- a/mm/zbud.c
++++ b/mm/zbud.c
+@@ -385,7 +385,7 @@ int zbud_alloc(struct zbud_pool *pool, size_t size, gfp_t gfp,
+ 	spin_unlock(&pool->lock);
+ 	page = alloc_page(gfp);
+ 	if (!page)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	spin_lock(&pool->lock);
+ 	pool->pages_nr++;
+ 	zhdr = init_zbud_page(page);
+diff --git a/mm/zsmalloc.c b/mm/zsmalloc.c
+index 952a01e45..bd8dceb70 100644
+--- a/mm/zsmalloc.c
++++ b/mm/zsmalloc.c
+@@ -1124,7 +1124,7 @@ static inline int __zs_cpu_up(struct mapping_area *area)
+ 		return 0;
+ 	area->vm = alloc_vm_area(PAGE_SIZE * 2, NULL);
+ 	if (!area->vm)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	return 0;
+ }
+ 
+@@ -1165,7 +1165,7 @@ static inline int __zs_cpu_up(struct mapping_area *area)
+ 		return 0;
+ 	area->vm_buf = kmalloc(ZS_MAX_ALLOC_SIZE, GFP_KERNEL);
+ 	if (!area->vm_buf)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	return 0;
+ }
+ 
+diff --git a/mm/zswap.c b/mm/zswap.c
+index fbb782924..9091e9804 100644
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -395,7 +395,7 @@ static int zswap_dstmem_prepare(unsigned int cpu)
+ 
+ 	dst = kmalloc_node(PAGE_SIZE * 2, GFP_KERNEL, cpu_to_node(cpu));
+ 	if (!dst)
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 
+ 	per_cpu(zswap_dstmem, cpu) = dst;
+ 	return 0;
+@@ -424,7 +424,7 @@ static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
+ 	if (IS_ERR_OR_NULL(tfm)) {
+ 		pr_err("could not alloc crypto comp %s : %ld\n",
+ 		       pool->tfm_name, PTR_ERR(tfm));
+-		return -ENOMEM;
++		ENOMEM_DUMPER(sysctl_error_barf);
+ 	}
+ 	*per_cpu_ptr(pool->tfm, cpu) = tfm;
+ 	return 0;
+@@ -1369,7 +1369,7 @@ static int __init init_zswap(void)
+ 	/* if built-in, we aren't unloaded on failure; don't allow use */
+ 	zswap_init_failed = true;
+ 	zswap_enabled = false;
+-	return -ENOMEM;
++	ENOMEM_DUMPER(sysctl_error_barf);
+ }
+ /* must be late so crypto has time to come up */
+ late_initcall(init_zswap);
+-- 
+2.25.4
+
