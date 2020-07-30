@@ -1,7 +1,7 @@
 From 7e63e651e4d52bc5bc2b3c9b28135d23fcb35ff3 Mon Sep 17 00:00:00 2001
 From: user <user@localhost.localdomain>
 Date: Thu, 30 Jul 2020 13:48:59 -0400
-Subject: [PATCH 7/7] code replacement of "return -ENOMEM;"
+Subject: [PATCH 7/8] code replacement of "return -ENOMEM;"
 
 ---
  arch/x86/entry/syscalls/syscall_64.tbl.rej | 10 +++
