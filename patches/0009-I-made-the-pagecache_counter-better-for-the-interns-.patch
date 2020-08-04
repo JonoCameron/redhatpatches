@@ -1,0 +1,165 @@
+From 9f7a2ae2a2e7ba37ebd096676251537dec056893 Mon Sep 17 00:00:00 2001
+From: user <user@localhost.localdomain>
+Date: Tue, 4 Aug 2020 10:33:12 -0400
+Subject: [PATCH 9/9] I made the pagecache_counter better for the interns that
+ use this next year
+
+---
+ include/linux/mm.h          |  3 +++
+ include/linux/mman.h        |  2 ++
+ include/linux/syscalls.h    |  2 +-
+ include/uapi/linux/sysctl.h |  4 ++--
+ kernel/sys.c                | 10 +++++++++-
+ kernel/sysctl.c             | 12 ++++++------
+ mm/filemap.c                |  8 ++++----
+ 7 files changed, 27 insertions(+), 14 deletions(-)
+
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 35d8c3045..f12616787 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -198,6 +198,9 @@ extern int sysctl_max_map_count;
+ extern unsigned long sysctl_user_reserve_kbytes;
+ extern unsigned long sysctl_admin_reserve_kbytes;
+ 
++extern int sysctl_pagecache_hits;
++extern int sysctl_pagecache_misses;
++
+ #define ENOMEM_DUMPER(sysctl_error_barf)						\
+ do {											\
+ 	if (sysctl_error_barf !=0){							\
+diff --git a/include/linux/mman.h b/include/linux/mman.h
+index 7c2cac02d..65c2ba503 100644
+--- a/include/linux/mman.h
++++ b/include/linux/mman.h
+@@ -51,6 +51,8 @@
+ 		| MAP_HUGE_1GB)
+ 
+ extern int sysctl_error_barf;
++extern int sysctl_pagecache_hits;
++extern int sysctl_pagecache_misses;
+ 
+ extern int sysctl_overcommit_memory;
+ extern int sysctl_overcommit_ratio;
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 27fe06b8d..a8f5eb220 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -1425,6 +1425,6 @@ long compat_ksys_semtimedop(int semid, struct sembuf __user *tsems,
+ 			    const struct old_timespec32 __user *timeout);
+ 
+ asmlinkage long sys_add2int(int a, int b);
+-asmlinkage int sys_pagecache_counter(char* hits, char* miss);
++asmlinkage int sys_pagecache_counter(int* hits, int* miss);
+ #endif
+ 
+diff --git a/include/uapi/linux/sysctl.h b/include/uapi/linux/sysctl.h
+index cea39010a..624d29677 100644
+--- a/include/uapi/linux/sysctl.h
++++ b/include/uapi/linux/sysctl.h
+@@ -162,8 +162,8 @@ enum
+ enum
+ {
+ 	VM_ERROR_BARF=1,	/* was: struct: Set vm swapping control */
+-	VM_UNUSED2=2,		/* was; int: Linear or sqrt() swapout for hogs */
+-	VM_UNUSED3=3,		/* was: struct: Set free page thresholds */
++	VM_PAGECACHE_HITS=2,	/* was; int: Linear or sqrt() swapout for hogs */
++	VM_PAGECACHE_MISSES=3,	/* was: struct: Set free page thresholds */
+ 	VM_UNUSED4=4,		/* Spare */
+ 	VM_OVERCOMMIT_MEMORY=5,	/* Turn off the virtual memory safety limit */
+ 	VM_UNUSED5=6,		/* was: struct: Set buffer memory thresholds */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 0b42fd265..13a2637eb 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2710,8 +2710,15 @@ SYSCALL_DEFINE2(add2int, int, a, int, b)
+        but acted as an exercise for me to learn for when I have to implement this across the
+        whole kernel. */
+ 
+-SYSCALL_DEFINE2(pagecache_counter, char*, hits, char*, miss)
++SYSCALL_DEFINE2(pagecache_counter, int*, hits, int*, miss)
+ {
++	int succ_hits, succ_miss;
++
++	printk(KERN_INFO "sysctl_pagecache_hits: %d\n", sysctl_pagecache_hits);
++
++	succ_hits = copy_to_user(hits, &sysctl_pagecache_hits, sizeof(int));
++	succ_miss = copy_to_user(miss, &sysctl_pagecache_misses, sizeof(int));
++/*
+        int fd0, fd1;
+        int succ0, succ1;
+        char hitsbuf[8];
+@@ -2745,6 +2752,7 @@ SYSCALL_DEFINE2(pagecache_counter, char*, hits, char*, miss)
+ 
+        set_fs(old_fs);
+ 
++*/
+        return 0;
+ }
+ #endif /* CONFIG_COMPAT */
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index da1b46ae3..943c9a240 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -2644,8 +2644,8 @@ static struct ctl_table kern_table[] = {
+ 	{ }
+ };
+ 
+-extern int pagecache_hit;
+-extern int pagecache_miss;
++extern int sysctl_pagecache_hits;
++extern int sysctl_pagecache_misses;
+ extern int sysctl_error_barf;
+ 
+ static struct ctl_table vm_table[] = {
+@@ -2660,15 +2660,15 @@ static struct ctl_table vm_table[] = {
+ 	},
+ 	{
+ 		.procname       = "pagecache_hits",
+-		.data           = &pagecache_hit,
+-		.maxlen         = sizeof(pagecache_hit),
++		.data           = &sysctl_pagecache_hits,
++		.maxlen         = sizeof(sysctl_pagecache_hits),
+ 		.mode           = 0644,
+ 		.proc_handler   = proc_dointvec_minmax,
+ 	},
+ 	{
+ 		.procname       = "pagecache_misses",
+-		.data           = &pagecache_miss,
+-		.maxlen         = sizeof(pagecache_miss),
++		.data           = &sysctl_pagecache_misses,
++		.maxlen         = sizeof(sysctl_pagecache_misses),
+ 		.mode           = 0644,
+ 		.proc_handler   = proc_dointvec_minmax,
+ 	},
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 8ddaa629e..7dfdaf7f9 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -1598,8 +1598,8 @@ EXPORT_SYMBOL(find_lock_entry);
+  * Return: The found page or %NULL otherwise.
+  */
+ 
+-int pagecache_hit;
+-int pagecache_miss;
++int sysctl_pagecache_hits;
++int sysctl_pagecache_misses;
+ int sysctl_error_barf;
+ 
+ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t index,
+@@ -1610,10 +1610,10 @@ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t index,
+ repeat:
+ 	page = find_get_entry(mapping, index);
+ 	if(page){
+-		pagecache_hit++;
++		sysctl_pagecache_hits++;
+ 	}
+ 	else{
+-		pagecache_miss++;
++		sysctl_pagecache_misses++;
+ 	}
+ 	if (xa_is_value(page))
+ 		page = NULL;
+-- 
+2.25.4
+
