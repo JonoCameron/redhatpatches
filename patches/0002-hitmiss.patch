@@ -1,7 +1,7 @@
 From 884f35c3d98473dc59637dde71e2488d91e24ceb Mon Sep 17 00:00:00 2001
 From: user <user@localhost.localdomain>
 Date: Thu, 30 Jul 2020 10:38:50 -0400
-Subject: [PATCH 2/8] hitmiss
+Subject: [PATCH 2/9] hitmiss
 
 ---
  include/linux/mm.h |  3 +++

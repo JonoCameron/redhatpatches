@@ -1,29 +1,100 @@
-From 2981691e2df980d7f365ff380650818f1d4e059e Mon Sep 17 00:00:00 2001
+From 9f7a2ae2a2e7ba37ebd096676251537dec056893 Mon Sep 17 00:00:00 2001
 From: user <user@localhost.localdomain>
-Date: Thu, 30 Jul 2020 12:25:36 -0400
-Subject: [PATCH 0/6] *** SUBJECT HERE ***
+Date: Tue, 4 Aug 2020 10:36:52 -0400
+Subject: [PATCH 0/9] *** SUBJECT HERE ***
 
 after completely bricking my VM, this is the set of patches it took to get back to where I was before I bricked it
 
-user (6):
+4th August 2020
+I changed the way the pagecache_counter() worked as a syscall so that it doesn't look absolutely god awful. If you want
+to see how bad it was, go and check it out in linux/kernel/sys.c.
+
+user (9):
   add2int
   hitmiss
   dump_stack
   pagecachesyscalls
   dumponENOMEM
   macroAndCheese
+  code replacement of "return -ENOMEM;"
+  added necessary library for the MACRO to work
+  I made the pagecache_counter better for the interns that use this next
+    year
 
- Makefile                               |  2 +-
- arch/x86/entry/syscalls/syscall_64.tbl |  2 +
- include/linux/mm.h                     | 12 ++++++
- include/linux/mman.h                   |  2 +
- include/linux/syscalls.h               |  3 ++
- include/uapi/linux/sysctl.h            |  2 +-
- kernel/sys.c                           | 56 ++++++++++++++++++++++++++
- kernel/sysctl.c                        | 27 +++++++++++++
- mm/filemap.c                           | 11 +++++
- mm/mmap.c                              |  5 ++-
- 10 files changed, 118 insertions(+), 4 deletions(-)
+ Makefile                                   |  2 +-
+ arch/x86/entry/syscalls/syscall_64.tbl     |  2 +
+ arch/x86/entry/syscalls/syscall_64.tbl.rej | 10 +++
+ include/linux/mm.h                         | 15 ++++
+ include/linux/mman.h                       |  4 +
+ include/linux/syscalls.h                   |  3 +
+ include/uapi/linux/sysctl.h                |  6 +-
+ include/uapi/linux/sysctl.h.rej            | 11 +++
+ kernel/sys.c                               | 64 ++++++++++++++++
+ kernel/sysctl.c                            | 27 +++++++
+ kernel/sysctl.c.rej                        | 18 +++++
+ mm/backing-dev.c                           |  7 +-
+ mm/cma.c                                   |  6 +-
+ mm/cma_debug.c                             |  4 +-
+ mm/filemap.c                               | 11 +++
+ mm/filemap.c.rej                           | 16 ++++
+ mm/gup.c                                   |  3 +-
+ mm/gup_benchmark.c                         |  2 +-
+ mm/huge_memory.c                           |  2 +-
+ mm/hugetlb.c                               | 16 ++--
+ mm/kasan/common.c                          |  4 +-
+ mm/kasan/init.c                            |  8 +-
+ mm/khugepaged.c                            |  6 +-
+ mm/kmemleak-test.c                         |  2 +-
+ mm/kmemleak.c                              |  2 +-
+ mm/ksm.c                                   |  4 +-
+ mm/list_lru.c                              | 15 ++--
+ mm/madvise.c                               |  4 +-
+ mm/memblock.c                              |  5 +-
+ mm/memcontrol.c                            | 17 +++--
+ mm/memfd.c                                 |  4 +-
+ mm/memory.c                                | 48 ++++++------
+ mm/mempolicy.c                             |  8 +-
+ mm/mempool.c                               |  8 +-
+ mm/migrate.c                               |  7 +-
+ mm/mincore.c                               |  4 +-
+ mm/mlock.c                                 |  2 +-
+ mm/mm_init.c                               |  3 +-
+ mm/mmap.c                                  | 87 +++++++++++-----------
+ mm/mmap.c.rej                              | 11 +++
+ mm/mmu_notifier.c                          |  3 +-
+ mm/mprotect.c                              |  6 +-
+ mm/mremap.c                                |  6 +-
+ mm/nommu.c                                 | 22 +++---
+ mm/page_ext.c                              |  6 +-
+ mm/page_owner.c                            |  4 +-
+ mm/percpu-stats.c                          |  2 +-
+ mm/percpu-vm.c                             | 10 ++-
+ mm/process_vm_access.c                     |  3 +-
+ mm/rmap.c                                  |  7 +-
+ mm/shmem.c                                 | 16 ++--
+ mm/slab.c                                  |  8 +-
+ mm/slab_common.c                           |  9 ++-
+ mm/slub.c                                  |  7 +-
+ mm/sparse-vmemmap.c                        | 11 +--
+ mm/sparse.c                                |  3 +-
+ mm/swap_cgroup.c                           |  5 +-
+ mm/swap_slots.c                            |  6 +-
+ mm/swap_state.c                            |  5 +-
+ mm/swapfile.c                              | 10 +--
+ mm/util.c                                  |  2 +-
+ mm/vmalloc.c                               | 17 +++--
+ mm/vmpressure.c                            |  3 +-
+ mm/vmscan.c                                |  5 +-
+ mm/z3fold.c                                |  6 +-
+ mm/zbud.c                                  |  4 +-
+ mm/zsmalloc.c                              |  6 +-
+ mm/zswap.c                                 |  8 +-
+ 68 files changed, 455 insertions(+), 223 deletions(-)
+ create mode 100644 arch/x86/entry/syscalls/syscall_64.tbl.rej
+ create mode 100644 include/uapi/linux/sysctl.h.rej
+ create mode 100644 kernel/sysctl.c.rej
+ create mode 100644 mm/filemap.c.rej
+ create mode 100644 mm/mmap.c.rej
 
 -- 
 2.25.4
