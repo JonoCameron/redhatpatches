@@ -1,0 +1,47 @@
+From 14a1a2aa739a5bd8e9d756ac7c380083f8a04564 Mon Sep 17 00:00:00 2001
+From: user <user@localhost.localdomain>
+Date: Thu, 6 Aug 2020 14:32:22 -0400
+Subject: [PATCH 12/14] For Larry, ENOENT_DUMP
+
+---
+ include/linux/errno.h | 11 ++++++++++-
+ mm/mmap.c             |  1 +
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/errno.h b/include/linux/errno.h
+index d73f597a2..8eef11da3 100644
+--- a/include/linux/errno.h
++++ b/include/linux/errno.h
+@@ -4,7 +4,16 @@
+ 
+ #include <uapi/linux/errno.h>
+ 
+-
++#define ENOENT_DUMPER(sysctl_error_barf)						\
++do{											\
++	if(sysctl_error_barf != 0){							\
++		printk(KERN_INFO "ENOENT_DUMPER linux/include/linux/errno.h\n");	\
++		return -ENOENT;								\
++	}										\
++	else{										\
++		return -ENOENT;								\
++	}										\
++}while(0)
+ /*
+  * These should never be seen by user programs.  To return one of ERESTART*
+  * codes, signal_pending() MUST be set.  Note that ptrace can observe these
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 6cb898721..22e74e8de 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1722,6 +1722,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
+ 	if (accountable_mapping(file, vm_flags)) {
+ 		charged = len >> PAGE_SHIFT;
+ 		if (security_vm_enough_memory_mm(mm, charged)){
++			ENOENT_DUMPER(sysctl_error_barf);
+ 			ENOMEM_DUMPER(sysctl_error_barf);
+ 		}
+ 		vm_flags |= VM_ACCOUNT;
+-- 
+2.25.4
+

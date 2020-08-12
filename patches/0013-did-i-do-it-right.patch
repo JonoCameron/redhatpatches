@@ -1,0 +1,142 @@
+From 4cc471e7b443cfdfa855efc602a677036462bbf2 Mon Sep 17 00:00:00 2001
+From: user <user@localhost.localdomain>
+Date: Tue, 11 Aug 2020 13:50:12 -0400
+Subject: [PATCH 13/14] did i do it right?
+
+---
+ include/linux/errno.h       |  4 ++--
+ include/linux/kernel.h      |  2 ++
+ include/uapi/linux/sysctl.h |  3 ++-
+ kernel/sys.c                |  3 +++
+ kernel/sysctl.c             | 14 ++++++++++++++
+ mm/mmap.c                   |  4 ++--
+ 6 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/errno.h b/include/linux/errno.h
+index 8eef11da3..1738ba062 100644
+--- a/include/linux/errno.h
++++ b/include/linux/errno.h
+@@ -4,9 +4,9 @@
+ 
+ #include <uapi/linux/errno.h>
+ 
+-#define ENOENT_DUMPER(sysctl_error_barf)						\
++#define ENOENT_DUMPER(stackdump_tuneable)						\
+ do{											\
+-	if(sysctl_error_barf != 0){							\
++	if(stackdump_tuneable != 0){							\
+ 		printk(KERN_INFO "ENOENT_DUMPER linux/include/linux/errno.h\n");	\
+ 		return -ENOENT;								\
+ 	}										\
+diff --git a/include/linux/kernel.h b/include/linux/kernel.h
+index 82d91547d..40dde15bb 100644
+--- a/include/linux/kernel.h
++++ b/include/linux/kernel.h
+@@ -21,6 +21,8 @@
+ 
+ #define STACK_MAGIC	0xdeadbeef
+ 
++extern int stackdump_tuneable;
++
+ /**
+  * REPEAT_BYTE - repeat the value @x multiple times as an unsigned long value
+  * @x: value to repeat
+diff --git a/include/uapi/linux/sysctl.h b/include/uapi/linux/sysctl.h
+index 624d29677..87e5d2166 100644
+--- a/include/uapi/linux/sysctl.h
++++ b/include/uapi/linux/sysctl.h
+@@ -154,6 +154,7 @@ enum
+ 	KERN_PANIC_ON_NMI=76, /* int: whether we will panic on an unrecovered */
+ 	KERN_PANIC_ON_WARN=77, /* int: call panic() in WARN() functions */
+ 	KERN_PANIC_PRINT=78, /* ulong: bitmask to print system info on panic */
++	KERN_STACKDUMP_TUNEABLE=79, /* int: set !=0 for dump_stack() on error */
+ };
+ 
+ 
+@@ -164,7 +165,7 @@ enum
+ 	VM_ERROR_BARF=1,	/* was: struct: Set vm swapping control */
+ 	VM_PAGECACHE_HITS=2,	/* was; int: Linear or sqrt() swapout for hogs */
+ 	VM_PAGECACHE_MISSES=3,	/* was: struct: Set free page thresholds */
+-	VM_UNUSED4=4,		/* Spare */
++	VM_UNUSED=4,		/* Spare */
+ 	VM_OVERCOMMIT_MEMORY=5,	/* Turn off the virtual memory safety limit */
+ 	VM_UNUSED5=6,		/* was: struct: Set buffer memory thresholds */
+ 	VM_UNUSED7=7,		/* was: struct: Set cache memory thresholds */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index b9c131ece..d45293b42 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -137,6 +137,9 @@ int overflowgid = DEFAULT_OVERFLOWGID;
+ EXPORT_SYMBOL(overflowuid);
+ EXPORT_SYMBOL(overflowgid);
+ 
++int stackdump_tuneable;
++EXPORT_SYMBOL(stackdump_tuneable);
++
+ /*
+  * the same as above, but for filesystems which can only store a 16-bit
+  * UID and GID. as such, this is needed on all architectures
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index 943c9a240..e73a58b54 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -104,6 +104,8 @@
+ #include <linux/nmi.h>
+ #endif
+ 
++#include <linux/errno.h>
++
+ #if defined(CONFIG_SYSCTL)
+ 
+ /* Constants used for minimum and  maximum */
+@@ -1652,6 +1654,8 @@ int proc_do_static_key(struct ctl_table *table, int write,
+ 	return ret;
+ }
+ 
++extern int stackdump_tuneable;
++
+ static struct ctl_table kern_table[] = {
+ 	{
+ 		.procname	= "sched_child_runs_first",
+@@ -2098,6 +2102,15 @@ static struct ctl_table kern_table[] = {
+ 		.proc_handler	= proc_do_cad_pid,
+ 	},
+ #endif
++	{
++                .procname	= "stackdump_tuneable",
++                .data           = &stackdump_tuneable,
++                .maxlen         = sizeof(stackdump_tuneable),
++                .mode           = 0644,
++                .proc_handler   = proc_dointvec_minmax,
++                .extra1         = SYSCTL_ZERO,
++                .extra2         = SYSCTL_ONE,
++        },
+ 	{
+ 		.procname	= "threads-max",
+ 		.data		= NULL,
+@@ -2648,6 +2661,7 @@ extern int sysctl_pagecache_hits;
+ extern int sysctl_pagecache_misses;
+ extern int sysctl_error_barf;
+ 
++
+ static struct ctl_table vm_table[] = {
+ 	{
+ 		.procname	= "overcommit_memory",
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 22e74e8de..0bdb07c56 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1722,8 +1722,8 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
+ 	if (accountable_mapping(file, vm_flags)) {
+ 		charged = len >> PAGE_SHIFT;
+ 		if (security_vm_enough_memory_mm(mm, charged)){
+-			ENOENT_DUMPER(sysctl_error_barf);
+-			ENOMEM_DUMPER(sysctl_error_barf);
++			ENOENT_DUMPER(stackdump_tuneable);
++			/* ENOMEM_DUMPER(sysctl_error_barf); */
+ 		}
+ 		vm_flags |= VM_ACCOUNT;
+ 	}
+-- 
+2.25.4
+

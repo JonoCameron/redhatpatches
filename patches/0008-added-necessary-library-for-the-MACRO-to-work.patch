@@ -1,7 +1,7 @@
 From af244ecbeb5d7fc5b4c437c451987467c428f144 Mon Sep 17 00:00:00 2001
 From: user <user@localhost.localdomain>
 Date: Thu, 30 Jul 2020 14:25:26 -0400
-Subject: [PATCH 8/9] added necessary library for the MACRO to work
+Subject: [PATCH 08/14] added necessary library for the MACRO to work
 
 ---
  mm/backing-dev.c       | 1 +

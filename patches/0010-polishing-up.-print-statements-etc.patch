@@ -1,0 +1,36 @@
+From e4ee86b9468434bf8dd387b092760adb4e532674 Mon Sep 17 00:00:00 2001
+From: user <user@localhost.localdomain>
+Date: Tue, 4 Aug 2020 10:54:30 -0400
+Subject: [PATCH 10/14] polishing up... print statements etc.
+
+---
+ kernel/sys.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 13a2637eb..b9c131ece 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2714,10 +2714,10 @@ SYSCALL_DEFINE2(pagecache_counter, int*, hits, int*, miss)
+ {
+ 	int succ_hits, succ_miss;
+ 
+-	printk(KERN_INFO "sysctl_pagecache_hits: %d\n", sysctl_pagecache_hits);
+-
+ 	succ_hits = copy_to_user(hits, &sysctl_pagecache_hits, sizeof(int));
+ 	succ_miss = copy_to_user(miss, &sysctl_pagecache_misses, sizeof(int));
++
++	return 0;
+ /*
+        int fd0, fd1;
+        int succ0, succ1;
+@@ -2753,6 +2753,5 @@ SYSCALL_DEFINE2(pagecache_counter, int*, hits, int*, miss)
+        set_fs(old_fs);
+ 
+ */
+-       return 0;
+ }
+ #endif /* CONFIG_COMPAT */
+-- 
+2.25.4
+
